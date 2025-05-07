@@ -29,11 +29,11 @@ if (MONGODB_URI) {
   console.warn('MONGODB_URI não definida - pulando conexão com MongoDB');
 }
 
-// Endpoint fixo do gateway VenuzPay (URL base + versão da API)
-const CREATE_PIX_URL = 'https://app.venuzpay.com/api/v1/gateway/pix/receive';
+// URL do Gateway Pix
+const GATEWAY_URL = 'https://app.venuzpay.com/api/v1/gateway/pix/receive';
 
 // Middleware de autenticação VenuzPay
-app.use((req, res, next) => {
+typeof process !== 'undefined' && app.use((req, res, next) => {
   req.venuzHeaders = {
     'x-public-key': VENUZ_PUBLIC_KEY,
     'x-secret-key': VENUZ_SECRET_KEY,
@@ -46,14 +46,12 @@ app.use((req, res, next) => {
 app.get('/', (req, res) => res.json({ ok: true, message: 'API VenuzPay ativo (raiz)' }));
 app.get('/api', (req, res) => res.json({ ok: true, message: 'API VenuzPay ativo (/api)' }));
 
-// Cria cobrança Pix
-// Agora rota interna é '/pix/create', e a Vercel expõe em '/api/pix/create'
-app.post('/pix/create', async (req, res) => {
-  const url = CREATE_PIX_URL;
+// Receber Pix - proxy para gateway
+app.post('/api/pix/create', async (req, res) => {
   const {
+    identifier,
     amount,
-    externalId,
-    customerEmail,
+    client,
     shippingFee = 0,
     extraFee = 0,
     discount = 0,
@@ -61,85 +59,60 @@ app.post('/pix/create', async (req, res) => {
     splits = [],
     dueDate,
     metadata = {},
-    callbackUrl: cbUrl
+    callbackUrl
   } = req.body;
 
-  // Validação de email do cliente
-  if (!customerEmail || typeof customerEmail !== 'string' || !customerEmail.includes('@')) {
-    return res.status(400).json({ message: 'customerEmail válido é obrigatório para criar cobrança Pix.' });
+  // Validações mínimas
+  if (!identifier || typeof identifier !== 'string') {
+    return res.status(400).json({ message: 'identifier (string) obrigatório.' });
+  }
+  if (typeof amount !== 'number' || amount <= 0) {
+    return res.status(400).json({ message: 'amount (number > 0) obrigatório.' });
+  }
+  if (!client || !client.email || typeof client.email !== 'string') {
+    return res.status(400).json({ message: 'client.email (string) obrigatório.' });
   }
 
-  // Montagem do payload
+  // Montar payload conforme documentação do Gateway
   const payload = {
-    identifier: externalId || `tg_${Date.now()}`,
+    identifier,
     amount,
     shippingFee,
     extraFee,
     discount,
-    client: {
-      email: customerEmail,
-      ...(metadata.customerName && { name: metadata.customerName }),
-      ...(metadata.customerPhone && { phone: metadata.customerPhone }),
-    },
+    client: { email: client.email },
     products,
     splits,
-    metadata: { ...metadata, source: 'telegram' }
+    metadata,
   };
-
-  if (cbUrl && /^https?:\/\//.test(cbUrl)) {
-    payload.callbackUrl = cbUrl;
-  } else if (WEBHOOK_BASE_URL && /^https?:\/\//.test(WEBHOOK_BASE_URL)) {
+  if (dueDate) payload.dueDate = dueDate;
+  if (callbackUrl) {
+    payload.callbackUrl = callbackUrl;
+  } else if (WEBHOOK_BASE_URL) {
     payload.callbackUrl = `${WEBHOOK_BASE_URL.replace(/\/+$/, '')}/api/webhook/pix`;
   }
 
-  if (dueDate) {
-    payload.dueDate = dueDate;
-  }
-
-  console.log('[API] Criando PIX em', url, 'com payload:', payload);
   try {
-    const { data, status } = await axios.post(url, payload, { headers: req.venuzHeaders });
-    console.log('[API] VenuzPay retornou:', status, data);
-
-    const { transactionId, status: txStatus, fee, order, pix = {} } = data;
-    const qrCodeBase64 = pix.qrCodeImage || pix.qrCodeBase64;
-    const qrCodeText = pix.qrCodeText || pix.payload;
-
-    return res.status(201).json({ transactionId, status: txStatus, fee, order, qrCodeBase64, qrCodeText });
+    console.log('[API] Proxy criando PIX para gateway:', payload);
+    const { data } = await axios.post(GATEWAY_URL, payload, { headers: req.venuzHeaders });
+    return res.status(201).json(data);
   } catch (err) {
-    const errData = err.response?.data;
-    console.error('[API] Erro criando PIX:', err.response?.status, errData?.message || err.message);
-    if (errData?.details) {
-      console.error('[API] Detalhes do erro:', JSON.stringify(errData.details, null, 2));
-    }
-    const code = err.response?.status || 500;
-    const body = errData || { message: err.message };
-    return res.status(code).json(body);
+    console.error('[API] Erro no proxy ao criar PIX:', err.response?.status, err.response?.data || err.message);
+    const status = err.response?.status || 500;
+    const body = err.response?.data || { message: err.message };
+    return res.status(status).json(body);
   }
 });
 
-// Consulta status Pix
-app.get('/pix/status/:id', async (req, res) => {
+// Consulta status Pix proxy (opcional)
+app.get('/api/pix/status/:id', async (req, res) => {
   const { id } = req.params;
-  const urls = [
-    'https://app.venuzpay.com/api/v1/pix/status/' + id,
-    'https://app.venuzpay.com/api/v1/cob/' + id
-  ];
-  console.log('[API] Consultando status em', urls);
-  for (const u of urls) {
-    try {
-      const { data } = await axios.get(u, { headers: req.venuzHeaders });
-      console.log('[API] Status', u, data);
-      return res.json(data);
-    } catch (e) {
-      console.warn('[API] Falha em', u, e.response?.status);
-    }
-  }
-  return res.status(404).json({ error: 'Status Pix não encontrado.' });
+  // Pode encaminhar similarmente ao gateway se desejar
+  return res.status(501).json({ message: 'Consulta de status não implementada nesta proxy.' });
 });
 
 // Webhook Pix
-app.post('/webhook/pix', (req, res) => {
+app.post('/api/webhook/pix', (req, res) => {
   const { transactionId, status } = req.body;
   console.log(`Webhook Pix recebido: ${transactionId} -> ${status}`);
   return res.status(200).send('OK');
