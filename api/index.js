@@ -31,17 +31,13 @@ if (MONGODB_URI) {
   console.warn('MONGODB_URI não definida - pulando conexão com MongoDB');
 }
 
-// URL base da API VenuzPay (sem versão no path, conforme documentação)
+// Configurações do gateway
 const BASE_URL = 'https://app.venuzpay.com';
-// Path padrão para criação
 const DEFAULT_PATH = '/gateway/pix/receive';
 
-// Função para construir URL de criação
 function getCreateUrl() {
   if (CREATE_PATH) {
-    if (/^https?:\/\//.test(CREATE_PATH)) {
-      return CREATE_PATH;
-    }
+    if (/^https?:\/\//.test(CREATE_PATH)) return CREATE_PATH;
     return `${BASE_URL.replace(/\/+$/,'')}${CREATE_PATH}`;
   }
   return `${BASE_URL}${DEFAULT_PATH}`;
@@ -61,10 +57,7 @@ app.use((req, res, next) => {
 app.get('/', (req, res) => res.json({ ok: true, message: 'API VenuzPay ativo (raiz)' }));
 app.get('/api', (req, res) => res.json({ ok: true, message: 'API VenuzPay ativo (/api)' }));
 
-/**
- * POST /api/pix/create
- * Cria cobrança Pix na VenuzPay
- */
+// Cria cobrança Pix
 app.post('/api/pix/create', async (req, res) => {
   const url = getCreateUrl();
   const {
@@ -78,7 +71,7 @@ app.post('/api/pix/create', async (req, res) => {
     splits = [],
     dueDate,
     metadata = {},
-    callbackUrl: callbackUrlBody
+    callbackUrl: cbUrl
   } = req.body;
 
   const payload = {
@@ -92,49 +85,42 @@ app.post('/api/pix/create', async (req, res) => {
     splits,
     metadata: { ...metadata, source: 'telegram' }
   };
-
-  if (callbackUrlBody && /^https?:\/\//.test(callbackUrlBody)) {
-    payload.callbackUrl = callbackUrlBody;
-  } else if (WEBHOOK_BASE_URL && /^https?:\/\//.test(WEBHOOK_BASE_URL)) {
+  if (cbUrl && /^https?:\/\//.test(cbUrl)) payload.callbackUrl = cbUrl;
+  else if (WEBHOOK_BASE_URL && /^https?:\/\//.test(WEBHOOK_BASE_URL)) {
     payload.callbackUrl = `${WEBHOOK_BASE_URL.replace(/\/+$/,'')}/api/webhook/pix`;
   }
-
   if (dueDate) payload.dueDate = dueDate;
 
   console.log('[API] Criando PIX em', url, 'com payload:', payload);
   try {
-    const response = await axios.post(url, payload, { headers: req.venuzHeaders });
-    const data = response.data;
-    console.log('[API] VenuzPay retornou:', response.status, data);
+    const { data, status } = await axios.post(url, payload, { headers: req.venuzHeaders });
+    console.log('[API] VenuzPay retornou:', status, data);
 
-    const { transactionId, status, fee, order, pix = {} } = data;
+    const { transactionId, status: txStatus, fee, order, pix = {} } = data;
     const qrCodeBase64 = pix.qrCodeImage || pix.qrCodeBase64;
     const qrCodeText = pix.qrCodeText || pix.payload;
 
-    return res.status(201).json({ transactionId, status, fee, order, qrCodeBase64, qrCodeText });
+    return res.status(201).json({ transactionId, status: txStatus, fee, order, qrCodeBase64, qrCodeText });
   } catch (err) {
     console.error('[API] Erro criando PIX:', err.response?.status, err.response?.data || err.message);
-    const statusCode = err.response?.status || 500;
-    const errBody = err.response?.data || { message: err.message };
-    return res.status(statusCode).json(errBody);
+    const code = err.response?.status || 500;
+    const body = err.response?.data || { message: err.message };
+    return res.status(code).json(body);
   }
 });
 
-/**
- * GET /api/pix/status/:id
- * Consulta status da cobrança
- */
+// Consulta status Pix
 app.get('/api/pix/status/:id', async (req, res) => {
   const { id } = req.params;
   const urls = [`${BASE_URL}/pix/status/${id}`, `${BASE_URL}/cob/${id}`];
   console.log('[API] Consultando status em', urls);
-  for (const url of urls) {
+  for (const u of urls) {
     try {
-      const response = await axios.get(url, { headers: req.venuzHeaders });
-      console.log('[API] Status', url, response.status, response.data);
-      return res.json(response.data);
-    } catch (err) {
-      console.warn('[API] Falha em', url, err.response?.status);
+      const { status, data } = await axios.get(u, { headers: req.venuzHeaders });
+      console.log('[API] Status', u, status, data);
+      return res.json(data);
+    } catch (e) {
+      console.warn('[API] Falha em', u, e.response?.status);
     }
   }
   return res.status(404).json({ error: 'Status Pix não encontrado.' });
@@ -147,5 +133,5 @@ app.post('/api/webhook/pix', (req, res) => {
   return res.status(200).send('OK');
 });
 
-// Exporta o handler serverless
-module.exports.handler = serverless(app);
+// Exports para Vercel Serverless
+module.exports = serverless(app);
