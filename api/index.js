@@ -43,30 +43,41 @@ app.get('/api', (req, res) => res.json({ ok: true, message: 'API VenuzPay ativo 
 
 /**
  * POST /api/pix/create
- * Cria cobrança Pix (Cobrança imediata) na VenuzPay via POST /cob
- * Body: { amount: Number, description?: String, externalId?: String, customerEmail?: String }
+ * Cria cobrança Pix na VenuzPay via POST /pix/create
+ * Body: { amount, description?, externalId?, customerEmail? }
  */
 app.post('/api/pix/create', async (req, res) => {
-  const url = `${BASE_URL}/cob`;
+  const createUrl = `${BASE_URL}/pix/create`;
+  const fallbackUrl = `${BASE_URL}/cob`;
   const { amount, description, externalId, customerEmail } = req.body;
-  // Request payload
   const createPayload = {
     amount,
-    txid: externalId || `pix_${Date.now()}`,
     description: description || 'Cobrança via API',
+    externalId: externalId || `pix_${Date.now()}`,
     ...(customerEmail && { customerEmail }),
   };
+  console.log('[API] In /api/pix/create - attempting URL:', createUrl, 'payload:', createPayload);
 
-  console.log('[API] In /api/pix/create - payload:', createPayload);
+  // Tenta primeiro /pix/create, senão /cob
   try {
-    const response = await axios.post(url, createPayload, { headers: req.venuzHeaders });
-    console.log('[API] Response from VenuzPay:', response.status, response.data);
-
-    // Desestrutura resposta, renomeando payload para qrCodeText
-    const { txid, qrCode, payload: qrCodeText } = response.data;
-    return res.status(201).json({ pixId: txid, qrCodeBase64: qrCode, qrCodeText });
+    let response;
+    try {
+      response = await axios.post(createUrl, createPayload, { headers: req.venuzHeaders });
+      console.log('[API] Success at /pix/create:', response.status);
+    } catch (err) {
+      console.warn('[API] /pix/create failed, status', err.response?.status, 'trying /cob');
+      response = await axios.post(fallbackUrl, createPayload, { headers: req.venuzHeaders });
+      console.log('[API] Success at /cob:', response.status);
+    }
+    console.log('[API] Response data:', response.data);
+    const data = response.data;
+    // Suporta respostas com diferentes chaves
+    const pixId = data.id || data.txid || data.externalId;
+    const qrCodeBase64 = data.qrCodeBase64 || data.qrCode || data.qr_code;
+    const qrCodeText = data.qrCodeText || data.payload || data.text;
+    return res.status(201).json({ pixId, qrCodeBase64, qrCodeText });
   } catch (err) {
-    console.error('[API] Error creating Pix:', err.response?.status, err.response?.data || err.message);
+    console.error('[API] Final error creating Pix:', err.response?.status, err.response?.data || err.message);
     const status = err.response?.status || 500;
     return res.status(status).json({ error: err.response?.data || 'Falha ao criar cobrança Pix.' });
   }
@@ -74,21 +85,23 @@ app.post('/api/pix/create', async (req, res) => {
 
 /**
  * GET /api/pix/status/:id
- * Consulta status da cobrança via GET /cob/{txid}
+ * Consulta status da cobrança Pix via GET /pix/status/:id ou /cob/:id
  */
 app.get('/api/pix/status/:id', async (req, res) => {
-  const txid = req.params.id;
-  const url = `${BASE_URL}/cob/${txid}`;
-  console.log('[API] In /api/pix/status - url:', url);
-  try {
-    const response = await axios.get(url, { headers: req.venuzHeaders });
-    console.log('[API] Response status Pix:', response.status, response.data);
-    return res.json(response.data);
-  } catch (err) {
-    console.error('[API] Error consulting Pix status:', err.response?.status, err.response?.data || err.message);
-    const status = err.response?.status || 500;
-    return res.status(status).json({ error: err.response?.data || 'Falha ao consultar status Pix.' });
+  const { id } = req.params;
+  const statusUrls = [`${BASE_URL}/pix/status/${id}`, `${BASE_URL}/cob/${id}`];
+  console.log('[API] In /api/pix/status - trying URLs:', statusUrls);
+  for (const url of statusUrls) {
+    try {
+      const response = await axios.get(url, { headers: req.venuzHeaders });
+      console.log('[API] Success at', url, response.data);
+      return res.json(response.data);
+    } catch (err) {
+      console.warn('[API] Status check failed at', url, err.response?.status);
+    }
   }
+  console.error('[API] All status endpoints failed for id', id);
+  return res.status(404).json({ error: 'Status Pix não encontrado.' });
 });
 
 // Webhook Pix (não altera payload)
