@@ -9,7 +9,13 @@ app.use(cors());
 app.use(express.json());
 
 // Variáveis de ambiente obrigatórias
-const { VENUZ_PUBLIC_KEY, VENUZ_SECRET_KEY, MONGODB_URI, CREATE_PATH } = process.env;
+const {
+  VENUZ_PUBLIC_KEY,
+  VENUZ_SECRET_KEY,
+  MONGODB_URI,
+  CREATE_PATH,
+  WEBHOOK_BASE_URL
+} = process.env;
 if (!VENUZ_PUBLIC_KEY || !VENUZ_SECRET_KEY) {
   console.error('Variáveis VENUZ_PUBLIC_KEY ou VENUZ_SECRET_KEY não definidas. Abortando.');
   process.exit(1);
@@ -26,8 +32,8 @@ if (MONGODB_URI) {
 
 // URL base da API VenuzPay
 const BASE_URL = 'https://app.venuzpay.com/api/v1';
-// Endpoint de criação configurável via ENV (ex: '/pix/create' ou '/cob')
-const CREATE_ENDPOINT = CREATE_PATH || '/pix/create';
+// Endpoint de criação (configurável via ENV)
+const CREATE_ENDPOINT = CREATE_PATH || '/gateway/pix/receive';
 
 // Middleware de autenticação VenuzPay: chaves em headers
 app.use((req, res, next) => {
@@ -45,39 +51,80 @@ app.get('/api', (req, res) => res.json({ ok: true, message: 'API VenuzPay ativo 
 
 /**
  * POST /api/pix/create
- * Cria cobrança Pix na VenuzPay. Path configurável via CREATE_PATH.
- * Body: { amount, description?, externalId?, customerEmail? }
+ * Cria cobrança Pix na VenuzPay (gateway/pix/receive)
+ * Body: { amount, externalId?, customerEmail?, shippingFee?, extraFee?, discount?, products?, splits?, dueDate?, metadata?, callbackUrl? }
  */
 app.post('/api/pix/create', async (req, res) => {
-  const createUrl = `${BASE_URL}${CREATE_ENDPOINT}`;
-  const { amount, description, externalId, customerEmail } = req.body;
-  const payload = {
+  const url = `${BASE_URL}${CREATE_ENDPOINT}`;
+  const {
     amount,
-    // para algumas APIs este campo pode ser txid, externalId ou id
-    txid: externalId || `pix_${Date.now()}`,
-    description: description || 'Cobrança via API',
-    ...(customerEmail && { customerEmail }),
+    externalId,
+    customerEmail,
+    shippingFee = 0,
+    extraFee = 0,
+    discount = 0,
+    products = [],
+    splits = [],
+    dueDate,
+    metadata = {},
+    callbackUrl = `${WEBHOOK_BASE_URL || ''}/api/webhook/pix`
+  } = req.body;
+
+  // Monta o payload conforme documentação VenuzPay
+  const payload = {
+    identifier: externalId || `tg_${Date.now()}`,
+    amount,
+    shippingFee,
+    extraFee,
+    discount,
+    client: { email: customerEmail || '' },
+    products,
+    splits,
+    metadata: {
+      ...metadata,
+      source: 'telegram'
+    },
+    callbackUrl
   };
-  console.log('[API] Chamando VenuzPay em', createUrl, 'com payload:', payload);
+  if (dueDate) payload.dueDate = dueDate;
+
+  console.log('[API] Criando PIX em', url, 'com payload:', payload);
   try {
-    const response = await axios.post(createUrl, payload, { headers: req.venuzHeaders });
-    console.log('[API] Response:', response.status, response.data);
+    const response = await axios.post(url, payload, { headers: req.venuzHeaders });
     const data = response.data;
-    // Ajuste chaves conforme retorno
-    const pixId = data.id || data.txid || data.externalId;
-    const qrCodeBase64 = data.qrCodeBase64 || data.qrCode || data.qr_code;
-    const qrCodeText = data.qrCodeText || data.payload || data.text;
-    return res.status(201).json({ pixId, qrCodeBase64, qrCodeText });
+    console.log('[API] VenuzPay retornou:', response.status, data);
+
+    // Extrai dados do objeto pix
+    const {
+      transactionId,
+      status,
+      fee,
+      order,
+      pix = {}
+    } = data;
+
+    const qrCodeBase64 = pix.qrCodeImage || pix.qrCodeBase64;
+    const qrCodeText = pix.qrCodeText || pix.payload;
+
+    return res.status(201).json({
+      transactionId,
+      status,
+      fee,
+      order,
+      qrCodeBase64,
+      qrCodeText
+    });
   } catch (err) {
-    console.error('[API] Erro criando Pix:', err.response?.status, err.response?.data || err.message);
-    const status = err.response?.status || 500;
-    return res.status(status).json({ error: err.response?.data || 'Falha ao criar cobrança Pix.' });
+    console.error('[API] Erro criando PIX:', err.response?.status, err.response?.data || err.message);
+    const statusCode = err.response?.status || 500;
+    const errBody = err.response?.data || { message: err.message };
+    return res.status(statusCode).json(errBody);
   }
 });
 
 /**
  * GET /api/pix/status/:id
- * Consulta status da cobrança via GET /cob/:id ou /pix/status/:id (não configurável)
+ * Consulta status da cobrança via GET /pix/status/:id ou /cob/:id
  */
 app.get('/api/pix/status/:id', async (req, res) => {
   const { id } = req.params;
@@ -97,8 +144,9 @@ app.get('/api/pix/status/:id', async (req, res) => {
 
 // Webhook Pix
 app.post('/api/webhook/pix', (req, res) => {
-  const { id, status } = req.body;
-  console.log(`Webhook Pix recebido: ${id} -> ${status}`);
+  const { transactionId, status } = req.body;
+  console.log(`Webhook Pix recebido: ${transactionId} -> ${status}`);
+  // TODO: tratar atualização de status no seu sistema
   return res.status(200).send('OK');
 });
 
