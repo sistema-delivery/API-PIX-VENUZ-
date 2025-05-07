@@ -56,15 +56,17 @@ app.post('/api/pix/create', async (req, res) => {
     description: description || 'Cobrança via API',
     ...(customerEmail && { customerEmail }),
   };
-  console.debug('POST VenuzPay create:', url, createPayload);
+
+  console.log('[API] In /api/pix/create - payload:', createPayload);
   try {
     const response = await axios.post(url, createPayload, { headers: req.venuzHeaders });
-    console.debug('Resposta create:', response.status, response.data);
+    console.log('[API] Response from VenuzPay:', response.status, response.data);
+
     // Desestrutura resposta, renomeando payload para qrCodeText
     const { txid, qrCode, payload: qrCodeText } = response.data;
     return res.status(201).json({ pixId: txid, qrCodeBase64: qrCode, qrCodeText });
   } catch (err) {
-    console.error('Erro criando Pix:', err.response?.status, err.response?.data || err.message);
+    console.error('[API] Error creating Pix:', err.response?.status, err.response?.data || err.message);
     const status = err.response?.status || 500;
     return res.status(status).json({ error: err.response?.data || 'Falha ao criar cobrança Pix.' });
   }
@@ -77,13 +79,13 @@ app.post('/api/pix/create', async (req, res) => {
 app.get('/api/pix/status/:id', async (req, res) => {
   const txid = req.params.id;
   const url = `${BASE_URL}/cob/${txid}`;
-  console.debug('GET VenuzPay status:', url);
+  console.log('[API] In /api/pix/status - url:', url);
   try {
     const response = await axios.get(url, { headers: req.venuzHeaders });
-    console.debug('Resposta status:', response.status, response.data);
+    console.log('[API] Response status Pix:', response.status, response.data);
     return res.json(response.data);
   } catch (err) {
-    console.error('Erro consultando status Pix:', err.response?.status, err.response?.data || err.message);
+    console.error('[API] Error consulting Pix status:', err.response?.status, err.response?.data || err.message);
     const status = err.response?.status || 500;
     return res.status(status).json({ error: err.response?.data || 'Falha ao consultar status Pix.' });
   }
