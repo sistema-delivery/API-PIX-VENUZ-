@@ -55,12 +55,12 @@ app.get('/api',      (req, res) => res.json({ ok: true, message: '/api OK' }));
 // 1) Cria cobrança PIX
 app.post('/api/pix/create', async (req, res) => {
   const {
+    identifier,
     amount,
-    externalId,
-    customerEmail,
     shippingFee = 0,
     extraFee    = 0,
     discount    = 0,
+    client      = {},
     products    = [],
     splits      = [],
     dueDate,
@@ -68,26 +68,27 @@ app.post('/api/pix/create', async (req, res) => {
     callbackUrl
   } = req.body;
 
+  // Monta payload conforme documentação VenuzPay
   const payload = {
-    identifier: externalId || `tg_${Date.now()}`,
+    identifier: identifier || `tg_${Date.now()}`,
     amount,
     shippingFee,
     extraFee,
     discount,
-    client: { email: customerEmail || '' },
+    client,
     products,
     splits,
     metadata: { ...metadata, source: 'telegram' }
   };
 
-  // callback automático se não vier custom
+  if (dueDate) payload.dueDate = dueDate;
+
+  // Define callbackUrl customizado ou usa base
   if (callbackUrl && /^https?:\/\//.test(callbackUrl)) {
     payload.callbackUrl = callbackUrl;
   } else if (WEBHOOK_BASE_URL) {
     payload.callbackUrl = `${WEBHOOK_BASE_URL.replace(/\/+$/, '')}/api/webhook/pix`;
   }
-
-  if (dueDate) payload.dueDate = dueDate;
 
   console.log('[API] Criando PIX em', CREATE_PIX_URL, payload);
   try {
@@ -98,7 +99,13 @@ app.post('/api/pix/create', async (req, res) => {
     );
     console.log('[API] VenuzPay retornou:', status, data);
 
-    const { transactionId, status: txStatus, fee, order, pix = {} } = data;
+    const {
+      transactionId,
+      status: txStatus,
+      fee,
+      order,
+      pix = {}
+    } = data;
     const qrCodeBase64 = pix.qrCodeImage || pix.qrCodeBase64;
     const qrCodeText   = pix.qrCodeText  || pix.payload;
 
