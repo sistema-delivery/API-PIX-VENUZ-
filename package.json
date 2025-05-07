@@ -1,7 +1,7 @@
 {
   "name": "api-pix-venuz",
   "version": "1.0.0",
-  "description": "API para gerar cobranças Pix via VenuzPay",
+  "description": "API Pix VenuzPay",
   "main": "api/index.js",
   "scripts": {
     "start": "node api/index.js"
