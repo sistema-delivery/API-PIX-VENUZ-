@@ -8,13 +8,20 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Conexão com o MongoDB
-mongoose.connect(
-  process.env.MONGODB_URI || 'mongodb://localhost:27017/venuzpay',
-  { useNewUrlParser: true, useUnifiedTopology: true }
-);
+// Conexão condicional com MongoDB
+const dbUri = process.env.MONGODB_URI;
+if (dbUri) {
+  mongoose.connect(dbUri, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+  })
+    .then(() => console.log('MongoDB conectado'))
+    .catch(err => console.error('Erro conectando ao MongoDB:', err));
+} else {
+  console.warn('MONGODB_URI não definida - pulando conexão com MongoDB');
+}
 
-// Model de usuário
+// Model de usuário (opcional)
 const UsuarioSchema = new mongoose.Schema({
   nome: String,
   email: String,
@@ -24,12 +31,12 @@ const UsuarioSchema = new mongoose.Schema({
       amount: Number,
       status: String,
       createdAt: { type: Date, default: Date.now },
-    },
-  ],
+    }
+  ]
 });
 const Usuario = mongoose.model('Usuario', UsuarioSchema);
 
-// Injeta credenciais
+// Middleware de autenticação VenuzPay
 app.use((req, res, next) => {
   req.venuzAuth = {
     publicKey: process.env.VENUZ_PUBLIC_KEY,
@@ -38,17 +45,17 @@ app.use((req, res, next) => {
   next();
 });
 
-// ROTA RAIZ: agora suportada
+// Rota raiz (health check)
 app.get('/', (req, res) => {
   res.json({ ok: true, message: 'API VenuzPay ativo (raiz)' });
 });
 
-// ROTA /api também funciona (opcional)
+// Rota /api (alternativa)
 app.get('/api', (req, res) => {
   res.json({ ok: true, message: 'API VenuzPay ativo (/api)' });
 });
 
-// Cria cobrança Pix
+// POST /api/pix/create - cria cobrança Pix na VenuzPay
 app.post('/api/pix/create', async (req, res) => {
   try {
     const { amount, description, externalId, customerEmail } = req.body;
@@ -58,6 +65,7 @@ app.post('/api/pix/create', async (req, res) => {
       externalId: externalId || `pix_${Date.now()}`,
       ...(customerEmail && { customerEmail }),
     };
+
     const response = await axios.post(
       'https://app.venuzpay.com/api/v1/pix/create',
       payload,
@@ -66,9 +74,10 @@ app.post('/api/pix/create', async (req, res) => {
           'x-public-key': req.venuzAuth.publicKey,
           'x-secret-key': req.venuzAuth.secretKey,
           'Content-Type': 'application/json',
-        },
+        }
       }
     );
+
     const { id, qrCodeBase64, qrCodeText } = response.data;
     res.status(201).json({ pixId: id, qrCodeBase64, qrCodeText });
   } catch (err) {
@@ -77,7 +86,7 @@ app.post('/api/pix/create', async (req, res) => {
   }
 });
 
-// Consulta status Pix
+// GET /api/pix/status/:id - consulta status da cobrança
 app.get('/api/pix/status/:id', async (req, res) => {
   try {
     const pixId = req.params.id;
@@ -87,7 +96,7 @@ app.get('/api/pix/status/:id', async (req, res) => {
         headers: {
           'x-public-key': req.venuzAuth.publicKey,
           'x-secret-key': req.venuzAuth.secretKey,
-        },
+        }
       }
     );
     res.json(response.data);
@@ -97,19 +106,17 @@ app.get('/api/pix/status/:id', async (req, res) => {
   }
 });
 
-// Webhook Pix
+// POST /api/webhook/pix - webhook de notificações
 app.post('/api/webhook/pix', (req, res) => {
   const { id, status } = req.body;
   console.log(`Webhook recebido. Pix ${id} agora está com status ${status}.`);
   res.status(200).send('OK');
 });
 
-// Apenas em dev local
+// Apenas para desenvolvimento local
 if (!process.env.VERCEL) {
   const port = process.env.PORT || 3000;
-  app.listen(port, () =>
-    console.log(`Dev server: http://localhost:${port}`)
-  );
+  app.listen(port, () => console.log(`Dev server rodando em http://localhost:${port}`));
 }
 
 module.exports = app;
