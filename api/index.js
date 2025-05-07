@@ -30,7 +30,7 @@ if (MONGODB_URI) {
 }
 
 // Endpoint fixo do gateway VenuzPay
-const CREATE_PIX_URL = 'https://app.venuzpay.com/gateway/pix/receive';
+const CREATE_PIX_URL = 'https://app.venuzpay.com/api/v1/gateway/pix/receive';
 
 // Middleware de autenticação VenuzPay
 app.use((req, res, next) => {
