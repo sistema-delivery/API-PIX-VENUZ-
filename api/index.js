@@ -49,20 +49,20 @@ app.get('/api', (req, res) => res.json({ ok: true, message: 'API VenuzPay ativo 
 app.post('/api/pix/create', async (req, res) => {
   const url = `${BASE_URL}/cob`;
   const { amount, description, externalId, customerEmail } = req.body;
-  // Aqui, usamos externalId como txid
-  const payload = {
+  // Request payload
+  const createPayload = {
     amount,
     txid: externalId || `pix_${Date.now()}`,
     description: description || 'Cobrança via API',
     ...(customerEmail && { customerEmail }),
   };
-  console.debug('POST VenuzPay create:', url, payload);
+  console.debug('POST VenuzPay create:', url, createPayload);
   try {
-    const response = await axios.post(url, payload, { headers: req.venuzHeaders });
+    const response = await axios.post(url, createPayload, { headers: req.venuzHeaders });
     console.debug('Resposta create:', response.status, response.data);
-    // Espera-se que a resposta contenha: txid, qrCode (base64 ou URL)
-    const { txid, qrCode, payload } = response.data;
-    return res.status(201).json({ pixId: txid, qrCodeBase64: qrCode, qrCodeText: payload });
+    // Desestrutura resposta, renomeando payload para qrCodeText
+    const { txid, qrCode, payload: qrCodeText } = response.data;
+    return res.status(201).json({ pixId: txid, qrCodeBase64: qrCode, qrCodeText });
   } catch (err) {
     console.error('Erro criando Pix:', err.response?.status, err.response?.data || err.message);
     const status = err.response?.status || 500;
