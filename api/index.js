@@ -8,7 +8,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// MongoDB connection
+// Conexão MongoDB
 mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/venuzpay', {
   useNewUrlParser: true,
   useUnifiedTopology: true,
@@ -29,7 +29,7 @@ const UsuarioSchema = new mongoose.Schema({
 });
 const Usuario = mongoose.model('Usuario', UsuarioSchema);
 
-// Middleware de autenticação
+// Injeta credenciais VenuzPay
 app.use((req, res, next) => {
   req.venuzAuth = {
     publicKey: process.env.VENUZ_PUBLIC_KEY,
@@ -38,23 +38,20 @@ app.use((req, res, next) => {
   next();
 });
 
-// Rota de teste
+// Rotas
 app.get('/api', (req, res) => {
   res.json({ ok: true, message: 'API VenuzPay ativo' });
 });
 
-// Criar Pix
 app.post('/api/pix/create', async (req, res) => {
   try {
     const { amount, description, externalId, customerEmail } = req.body;
-
     const payload = {
       amount,
       description: description || 'Cobrança via API',
       externalId: externalId || `pix_${Date.now()}`,
       ...(customerEmail && { customerEmail }),
     };
-
     const response = await axios.post(
       'https://app.venuzpay.com/api/v1/pix/create',
       payload,
@@ -66,21 +63,14 @@ app.post('/api/pix/create', async (req, res) => {
         }
       }
     );
-
     const { id, qrCodeBase64, qrCodeText } = response.data;
-
-    res.status(201).json({
-      pixId: id,
-      qrCodeBase64,
-      qrCodeText
-    });
+    res.status(201).json({ pixId: id, qrCodeBase64, qrCodeText });
   } catch (err) {
     console.error('Erro criando Pix:', err.response?.data || err.message);
     res.status(500).json({ error: 'Falha ao criar cobrança Pix.' });
   }
 });
 
-// Consultar status do Pix
 app.get('/api/pix/status/:id', async (req, res) => {
   try {
     const pixId = req.params.id;
@@ -93,7 +83,6 @@ app.get('/api/pix/status/:id', async (req, res) => {
         }
       }
     );
-
     res.json(response.data);
   } catch (err) {
     console.error('Erro consultando status Pix:', err.response?.data || err.message);
@@ -101,15 +90,13 @@ app.get('/api/pix/status/:id', async (req, res) => {
   }
 });
 
-// Webhook Pix
 app.post('/api/webhook/pix', async (req, res) => {
   const { id, status } = req.body;
   console.log(`Webhook recebido. Pix ${id} agora está com status ${status}.`);
-
   res.status(200).send('OK');
 });
 
-// Só roda localmente, não em serverless
+// Só em dev local
 if (!process.env.VERCEL) {
   const port = process.env.PORT || 3000;
   app.listen(port, () =>
@@ -117,5 +104,4 @@ if (!process.env.VERCEL) {
   );
 }
 
-// Exporta para Vercel
 module.exports = app;
