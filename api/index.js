@@ -13,7 +13,6 @@ const {
   VENUZ_PUBLIC_KEY,
   VENUZ_SECRET_KEY,
   MONGODB_URI,
-  CREATE_PATH,
   WEBHOOK_BASE_URL
 } = process.env;
 if (!VENUZ_PUBLIC_KEY || !VENUZ_SECRET_KEY) {
@@ -30,17 +29,8 @@ if (MONGODB_URI) {
   console.warn('MONGODB_URI não definida - pulando conexão com MongoDB');
 }
 
-// Configurações do gateway
-const BASE_URL = 'https://app.venuzpay.com';
-const DEFAULT_PATH = '/gateway/pix/receive';
-
-function getCreateUrl() {
-  if (CREATE_PATH) {
-    if (/^https?:\/\//.test(CREATE_PATH)) return CREATE_PATH;
-    return `${BASE_URL.replace(/\/+$/,'')}${CREATE_PATH}`;
-  }
-  return `${BASE_URL}${DEFAULT_PATH}`;
-}
+// Endpoint fixo do gateway VenuzPay
+const CREATE_PIX_URL = 'https://app.venuzpay.com/gateway/pix/receive';
 
 // Middleware de autenticação VenuzPay
 app.use((req, res, next) => {
@@ -58,7 +48,7 @@ app.get('/api', (req, res) => res.json({ ok: true, message: 'API VenuzPay ativo 
 
 // Cria cobrança Pix
 app.post('/api/pix/create', async (req, res) => {
-  const url = getCreateUrl();
+  const url = CREATE_PIX_URL;
   const {
     amount,
     externalId,
@@ -86,7 +76,7 @@ app.post('/api/pix/create', async (req, res) => {
   };
   if (cbUrl && /^https?:\/\//.test(cbUrl)) payload.callbackUrl = cbUrl;
   else if (WEBHOOK_BASE_URL && /^https?:\/\//.test(WEBHOOK_BASE_URL)) {
-    payload.callbackUrl = `${WEBHOOK_BASE_URL.replace(/\/+$/,'')}/api/webhook/pix`;
+    payload.callbackUrl = `${WEBHOOK_BASE_URL.replace(/\/+$/, '')}/api/webhook/pix`;
   }
   if (dueDate) payload.dueDate = dueDate;
 
@@ -111,12 +101,15 @@ app.post('/api/pix/create', async (req, res) => {
 // Consulta status Pix
 app.get('/api/pix/status/:id', async (req, res) => {
   const { id } = req.params;
-  const urls = [`${BASE_URL}/pix/status/${id}`, `${BASE_URL}/cob/${id}`];
+  const urls = [
+    'https://app.venuzpay.com/pix/status/' + id,
+    'https://app.venuzpay.com/cob/' + id
+  ];
   console.log('[API] Consultando status em', urls);
   for (const u of urls) {
     try {
-      const { status, data } = await axios.get(u, { headers: req.venuzHeaders });
-      console.log('[API] Status', u, status, data);
+      const { data } = await axios.get(u, { headers: req.venuzHeaders });
+      console.log('[API] Status', u, data);
       return res.json(data);
     } catch (e) {
       console.warn('[API] Falha em', u, e.response?.status);
