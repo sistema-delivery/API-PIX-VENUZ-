@@ -8,11 +8,11 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Conexão MongoDB
-mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/venuzpay', {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-});
+// Conexão com o MongoDB
+mongoose.connect(
+  process.env.MONGODB_URI || 'mongodb://localhost:27017/venuzpay',
+  { useNewUrlParser: true, useUnifiedTopology: true }
+);
 
 // Model de usuário
 const UsuarioSchema = new mongoose.Schema({
@@ -24,12 +24,12 @@ const UsuarioSchema = new mongoose.Schema({
       amount: Number,
       status: String,
       createdAt: { type: Date, default: Date.now },
-    }
-  ]
+    },
+  ],
 });
 const Usuario = mongoose.model('Usuario', UsuarioSchema);
 
-// Injeta credenciais VenuzPay
+// Injeta credenciais
 app.use((req, res, next) => {
   req.venuzAuth = {
     publicKey: process.env.VENUZ_PUBLIC_KEY,
@@ -38,11 +38,17 @@ app.use((req, res, next) => {
   next();
 });
 
-// Rotas
-app.get('/api', (req, res) => {
-  res.json({ ok: true, message: 'API VenuzPay ativo' });
+// ROTA RAIZ: agora suportada
+app.get('/', (req, res) => {
+  res.json({ ok: true, message: 'API VenuzPay ativo (raiz)' });
 });
 
+// ROTA /api também funciona (opcional)
+app.get('/api', (req, res) => {
+  res.json({ ok: true, message: 'API VenuzPay ativo (/api)' });
+});
+
+// Cria cobrança Pix
 app.post('/api/pix/create', async (req, res) => {
   try {
     const { amount, description, externalId, customerEmail } = req.body;
@@ -60,7 +66,7 @@ app.post('/api/pix/create', async (req, res) => {
           'x-public-key': req.venuzAuth.publicKey,
           'x-secret-key': req.venuzAuth.secretKey,
           'Content-Type': 'application/json',
-        }
+        },
       }
     );
     const { id, qrCodeBase64, qrCodeText } = response.data;
@@ -71,6 +77,7 @@ app.post('/api/pix/create', async (req, res) => {
   }
 });
 
+// Consulta status Pix
 app.get('/api/pix/status/:id', async (req, res) => {
   try {
     const pixId = req.params.id;
@@ -80,7 +87,7 @@ app.get('/api/pix/status/:id', async (req, res) => {
         headers: {
           'x-public-key': req.venuzAuth.publicKey,
           'x-secret-key': req.venuzAuth.secretKey,
-        }
+        },
       }
     );
     res.json(response.data);
@@ -90,17 +97,18 @@ app.get('/api/pix/status/:id', async (req, res) => {
   }
 });
 
-app.post('/api/webhook/pix', async (req, res) => {
+// Webhook Pix
+app.post('/api/webhook/pix', (req, res) => {
   const { id, status } = req.body;
   console.log(`Webhook recebido. Pix ${id} agora está com status ${status}.`);
   res.status(200).send('OK');
 });
 
-// Só em dev local
+// Apenas em dev local
 if (!process.env.VERCEL) {
   const port = process.env.PORT || 3000;
   app.listen(port, () =>
-    console.log(`Dev server rodando em http://localhost:${port}`)
+    console.log(`Dev server: http://localhost:${port}`)
   );
 }
 
