@@ -3,7 +3,6 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const axios = require('axios');
-const serverless = require('serverless-http');
 
 const app = express();
 app.use(cors());
@@ -22,7 +21,7 @@ if (!VENUZ_PUBLIC_KEY || !VENUZ_SECRET_KEY) {
   process.exit(1);
 }
 
-// Conexão condicional com MongoDB (opcional)
+// Conexão condicional com MongoDB
 if (MONGODB_URI) {
   mongoose.connect(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true })
     .then(() => console.log('MongoDB conectado'))
@@ -133,5 +132,4 @@ app.post('/api/webhook/pix', (req, res) => {
   return res.status(200).send('OK');
 });
 
-// Exports para Vercel Serverless
-module.exports = serverless(app);
+module.exports = app;
