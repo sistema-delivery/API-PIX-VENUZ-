@@ -47,7 +47,8 @@ app.get('/', (req, res) => res.json({ ok: true, message: 'API VenuzPay ativo (ra
 app.get('/api', (req, res) => res.json({ ok: true, message: 'API VenuzPay ativo (/api)' }));
 
 // Cria cobrança Pix
-app.post('/api/pix/create', async (req, res) => {
+// Agora rota interna é '/pix/create', e a Vercel expõe em '/api/pix/create'
+app.post('/pix/create', async (req, res) => {
   const url = CREATE_PIX_URL;
   const {
     amount,
@@ -118,7 +119,7 @@ app.post('/api/pix/create', async (req, res) => {
 });
 
 // Consulta status Pix
-app.get('/api/pix/status/:id', async (req, res) => {
+app.get('/pix/status/:id', async (req, res) => {
   const { id } = req.params;
   const urls = [
     'https://app.venuzpay.com/api/v1/pix/status/' + id,
@@ -138,7 +139,7 @@ app.get('/api/pix/status/:id', async (req, res) => {
 });
 
 // Webhook Pix
-app.post('/api/webhook/pix', (req, res) => {
+app.post('/webhook/pix', (req, res) => {
   const { transactionId, status } = req.body;
   console.log(`Webhook Pix recebido: ${transactionId} -> ${status}`);
   return res.status(200).send('OK');
