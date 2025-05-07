@@ -32,8 +32,16 @@ if (MONGODB_URI) {
 
 // URL base da API VenuzPay (sem versão no path, conforme documentação)
 const BASE_URL = 'https://app.venuzpay.com';
-// Endpoint de criação (configurável via ENV)
-const CREATE_ENDPOINT = CREATE_PATH || '/gateway/pix/receive';
+// Define endpoint de criação: usa CREATE_PATH se for URL absoluta, senão usa path padrão
+const DEFAULT_PATH = '/gateway/pix/receive';
+const CREATE_ENDPOINT = () => {
+  if (CREATE_PATH) {
+    return CREATE_PATH.startsWith('http')
+      ? CREATE_PATH
+      : `${BASE_URL}${CREATE_PATH}`;
+  }
+  return `${BASE_URL}${DEFAULT_PATH}`;
+};
 
 // Middleware de autenticação VenuzPay: chaves em headers
 app.use((req, res, next) => {
@@ -55,7 +63,7 @@ app.get('/api', (req, res) => res.json({ ok: true, message: 'API VenuzPay ativo 
  * Body: { amount, externalId?, customerEmail?, shippingFee?, extraFee?, discount?, products?, splits?, dueDate?, metadata?, callbackUrl? }
  */
 app.post('/api/pix/create', async (req, res) => {
-  const url = `${BASE_URL}${CREATE_ENDPOINT}`;
+  const url = CREATE_ENDPOINT();
   const {
     amount,
     externalId,
@@ -70,7 +78,6 @@ app.post('/api/pix/create', async (req, res) => {
     callbackUrl: callbackUrlBody
   } = req.body;
 
-  // Monta o payload conforme documentação VenuzPay
   const payload = {
     identifier: externalId || `tg_${Date.now()}`,
     amount,
@@ -80,16 +87,12 @@ app.post('/api/pix/create', async (req, res) => {
     client: { email: customerEmail || '' },
     products,
     splits,
-    metadata: {
-      ...metadata,
-      source: 'telegram'
-    }
+    metadata: { ...metadata, source: 'telegram' }
   };
 
-  // Define callbackUrl apenas se for um URL válido absoluto
-  if (callbackUrlBody) {
+  if (callbackUrlBody && /^https?:\/\//.test(callbackUrlBody)) {
     payload.callbackUrl = callbackUrlBody;
-  } else if (WEBHOOK_BASE_URL) {
+  } else if (WEBHOOK_BASE_URL && /^https?:\/\//.test(WEBHOOK_BASE_URL)) {
     payload.callbackUrl = `${WEBHOOK_BASE_URL.replace(/\/+$/,'')}/api/webhook/pix`;
   }
 
@@ -101,26 +104,11 @@ app.post('/api/pix/create', async (req, res) => {
     const data = response.data;
     console.log('[API] VenuzPay retornou:', response.status, data);
 
-    // Extrai dados do objeto pix
-    const {
-      transactionId,
-      status,
-      fee,
-      order,
-      pix = {}
-    } = data;
-
+    const { transactionId, status, fee, order, pix = {} } = data;
     const qrCodeBase64 = pix.qrCodeImage || pix.qrCodeBase64;
     const qrCodeText = pix.qrCodeText || pix.payload;
 
-    return res.status(201).json({
-      transactionId,
-      status,
-      fee,
-      order,
-      qrCodeBase64,
-      qrCodeText
-    });
+    return res.status(201).json({ transactionId, status, fee, order, qrCodeBase64, qrCodeText });
   } catch (err) {
     console.error('[API] Erro criando PIX:', err.response?.status, err.response?.data || err.message);
     const statusCode = err.response?.status || 500;
@@ -157,8 +145,7 @@ app.post('/api/webhook/pix', (req, res) => {
   return res.status(200).send('OK');
 });
 
-// Execução em dev local apenas
-if (!process.env.VERCEL) {
+// Execução em dev local apenas\if (!process.env.VERCEL) {
   const port = process.env.PORT || 3000;
   app.listen(port, () => console.log(`Dev server rodando: http://localhost:${port}`));
 }
