@@ -32,16 +32,17 @@ if (MONGODB_URI) {
 
 // URL base da API VenuzPay (sem versão no path, conforme documentação)
 const BASE_URL = 'https://app.venuzpay.com';
-// Define endpoint de criação: usa CREATE_PATH se for URL absoluta, senão usa path padrão
+// Define endpoint de criação: usa CREATE_PATH se for URL absoluta, senão usa path padrão relativo
 const DEFAULT_PATH = '/gateway/pix/receive';
-const CREATE_ENDPOINT = () => {
+function getCreateUrl() {
   if (CREATE_PATH) {
-    return CREATE_PATH.startsWith('http')
-      ? CREATE_PATH
-      : `${BASE_URL}${CREATE_PATH}`;
+    if (/^https?:\/\//.test(CREATE_PATH)) {
+      return CREATE_PATH;
+    }
+    return `${BASE_URL.replace(/\/+$/,'')}${CREATE_PATH}`;
   }
   return `${BASE_URL}${DEFAULT_PATH}`;
-};
+}
 
 // Middleware de autenticação VenuzPay: chaves em headers
 app.use((req, res, next) => {
@@ -59,11 +60,11 @@ app.get('/api', (req, res) => res.json({ ok: true, message: 'API VenuzPay ativo 
 
 /**
  * POST /api/pix/create
- * Cria cobrança Pix na VenuzPay (gateway/pix/receive)
+ * Cria cobrança Pix na VenuzPay
  * Body: { amount, externalId?, customerEmail?, shippingFee?, extraFee?, discount?, products?, splits?, dueDate?, metadata?, callbackUrl? }
  */
 app.post('/api/pix/create', async (req, res) => {
-  const url = CREATE_ENDPOINT();
+  const url = getCreateUrl();
   const {
     amount,
     externalId,
@@ -145,7 +146,8 @@ app.post('/api/webhook/pix', (req, res) => {
   return res.status(200).send('OK');
 });
 
-// Execução em dev local apenas\if (!process.env.VERCEL) {
+// Execução em dev local apenas
+if (!process.env.VERCEL) {
   const port = process.env.PORT || 3000;
   app.listen(port, () => console.log(`Dev server rodando: http://localhost:${port}`));
 }
