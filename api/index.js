@@ -30,8 +30,8 @@ if (MONGODB_URI) {
   console.warn('MONGODB_URI não definida - pulando conexão com MongoDB');
 }
 
-// URL base da API VenuzPay
-const BASE_URL = 'https://app.venuzpay.com/api/v1';
+// URL base da API VenuzPay (sem versão no path, conforme documentação)
+const BASE_URL = 'https://app.venuzpay.com';
 // Endpoint de criação (configurável via ENV)
 const CREATE_ENDPOINT = CREATE_PATH || '/gateway/pix/receive';
 
@@ -67,7 +67,7 @@ app.post('/api/pix/create', async (req, res) => {
     splits = [],
     dueDate,
     metadata = {},
-    callbackUrl = `${WEBHOOK_BASE_URL || ''}/api/webhook/pix`
+    callbackUrl: callbackUrlBody
   } = req.body;
 
   // Monta o payload conforme documentação VenuzPay
@@ -83,9 +83,16 @@ app.post('/api/pix/create', async (req, res) => {
     metadata: {
       ...metadata,
       source: 'telegram'
-    },
-    callbackUrl
+    }
   };
+
+  // Define callbackUrl apenas se for um URL válido absoluto
+  if (callbackUrlBody) {
+    payload.callbackUrl = callbackUrlBody;
+  } else if (WEBHOOK_BASE_URL) {
+    payload.callbackUrl = `${WEBHOOK_BASE_URL.replace(/\/+$/,'')}/api/webhook/pix`;
+  }
+
   if (dueDate) payload.dueDate = dueDate;
 
   console.log('[API] Criando PIX em', url, 'com payload:', payload);
