@@ -29,7 +29,7 @@ if (MONGODB_URI) {
   console.warn('MONGODB_URI não definida - pulando conexão com MongoDB');
 }
 
-// Endpoint fixo do gateway VenuzPay
+// Endpoint fixo do gateway VenuzPay (URL base + versão da API)
 const CREATE_PIX_URL = 'https://app.venuzpay.com/api/v1/gateway/pix/receive';
 
 // Middleware de autenticação VenuzPay
@@ -63,22 +63,37 @@ app.post('/api/pix/create', async (req, res) => {
     callbackUrl: cbUrl
   } = req.body;
 
+  // Validação de email do cliente
+  if (!customerEmail || typeof customerEmail !== 'string' || !customerEmail.includes('@')) {
+    return res.status(400).json({ message: 'customerEmail válido é obrigatório para criar cobrança Pix.' });
+  }
+
+  // Montagem do payload
   const payload = {
     identifier: externalId || `tg_${Date.now()}`,
     amount,
     shippingFee,
     extraFee,
     discount,
-    client: { email: customerEmail || '' },
+    client: {
+      email: customerEmail,
+      ...(metadata.customerName && { name: metadata.customerName }),
+      ...(metadata.customerPhone && { phone: metadata.customerPhone }),
+    },
     products,
     splits,
     metadata: { ...metadata, source: 'telegram' }
   };
-  if (cbUrl && /^https?:\/\//.test(cbUrl)) payload.callbackUrl = cbUrl;
-  else if (WEBHOOK_BASE_URL && /^https?:\/\//.test(WEBHOOK_BASE_URL)) {
+
+  if (cbUrl && /^https?:\/\//.test(cbUrl)) {
+    payload.callbackUrl = cbUrl;
+  } else if (WEBHOOK_BASE_URL && /^https?:\/\//.test(WEBHOOK_BASE_URL)) {
     payload.callbackUrl = `${WEBHOOK_BASE_URL.replace(/\/+$/, '')}/api/webhook/pix`;
   }
-  if (dueDate) payload.dueDate = dueDate;
+
+  if (dueDate) {
+    payload.dueDate = dueDate;
+  }
 
   console.log('[API] Criando PIX em', url, 'com payload:', payload);
   try {
@@ -91,9 +106,13 @@ app.post('/api/pix/create', async (req, res) => {
 
     return res.status(201).json({ transactionId, status: txStatus, fee, order, qrCodeBase64, qrCodeText });
   } catch (err) {
-    console.error('[API] Erro criando PIX:', err.response?.status, err.response?.data || err.message);
+    const errData = err.response?.data;
+    console.error('[API] Erro criando PIX:', err.response?.status, errData?.message || err.message);
+    if (errData?.details) {
+      console.error('[API] Detalhes do erro:', JSON.stringify(errData.details, null, 2));
+    }
     const code = err.response?.status || 500;
-    const body = err.response?.data || { message: err.message };
+    const body = errData || { message: err.message };
     return res.status(code).json(body);
   }
 });
@@ -102,8 +121,8 @@ app.post('/api/pix/create', async (req, res) => {
 app.get('/api/pix/status/:id', async (req, res) => {
   const { id } = req.params;
   const urls = [
-    'https://app.venuzpay.com/pix/status/' + id,
-    'https://app.venuzpay.com/cob/' + id
+    'https://app.venuzpay.com/api/v1/pix/status/' + id,
+    'https://app.venuzpay.com/api/v1/cob/' + id
   ];
   console.log('[API] Consultando status em', urls);
   for (const u of urls) {
