@@ -8,13 +8,13 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// MongoDB connection (ajuste URI se precisar)
+// MongoDB connection
 mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/venuzpay', {
   useNewUrlParser: true,
   useUnifiedTopology: true,
 });
 
-// Model de usuário (exemplo)
+// Model de usuário
 const UsuarioSchema = new mongoose.Schema({
   nome: String,
   email: String,
@@ -29,7 +29,7 @@ const UsuarioSchema = new mongoose.Schema({
 });
 const Usuario = mongoose.model('Usuario', UsuarioSchema);
 
-// Middleware: injeta credenciais VenuzPay
+// Middleware de autenticação
 app.use((req, res, next) => {
   req.venuzAuth = {
     publicKey: process.env.VENUZ_PUBLIC_KEY,
@@ -43,11 +43,7 @@ app.get('/api', (req, res) => {
   res.json({ ok: true, message: 'API VenuzPay ativo' });
 });
 
-/**
- * POST /api/pix/create
- * Cria cobrança Pix na VenuzPay
- * Body esperado: { amount: Number, description?: String, externalId?: String, customerEmail?: String }
- */
+// Criar Pix
 app.post('/api/pix/create', async (req, res) => {
   try {
     const { amount, description, externalId, customerEmail } = req.body;
@@ -71,21 +67,12 @@ app.post('/api/pix/create', async (req, res) => {
       }
     );
 
-    // Exemplo de response esperado:
-    // { id: 'abc123', qrCodeBase64: '...', qrCodeText: '000201...' }
     const { id, qrCodeBase64, qrCodeText } = response.data;
 
-    // Salva no usuário (opcional)
-    // await Usuario.updateOne(
-    //   { email: customerEmail },
-    //   { $push: { pixTransactions: { pixId: id, amount, status: 'pending' } } },
-    //   { upsert: true }
-    // );
-
-    res.status(201).json({ 
-      pixId: id, 
-      qrCodeBase64, 
-      qrCodeText 
+    res.status(201).json({
+      pixId: id,
+      qrCodeBase64,
+      qrCodeText
     });
   } catch (err) {
     console.error('Erro criando Pix:', err.response?.data || err.message);
@@ -93,10 +80,7 @@ app.post('/api/pix/create', async (req, res) => {
   }
 });
 
-/**
- * GET /api/pix/status/:id
- * Consulta status de cobrança Pix na VenuzPay
- */
+// Consultar status do Pix
 app.get('/api/pix/status/:id', async (req, res) => {
   try {
     const pixId = req.params.id;
@@ -110,8 +94,6 @@ app.get('/api/pix/status/:id', async (req, res) => {
       }
     );
 
-    // Exemplo de response esperado:
-    // { id: 'abc123', status: 'pending'|'paid'|'expired', paidAt: '...' }
     res.json(response.data);
   } catch (err) {
     console.error('Erro consultando status Pix:', err.response?.data || err.message);
@@ -119,25 +101,21 @@ app.get('/api/pix/status/:id', async (req, res) => {
   }
 });
 
-/**
- * (Opcional) Webhook de notificações da VenuzPay
- * Caso configurado na dashboard da VenuzPay
- */
+// Webhook Pix
 app.post('/api/webhook/pix', async (req, res) => {
   const { id, status } = req.body;
-  console.log(`Webhook recebido. Pix ${id} está agora com status ${status}.`);
-
-  // Atualize o status no banco, se desejar:
-  // await Usuario.updateOne(
-  //   { 'pixTransactions.pixId': id },
-  //   { $set: { 'pixTransactions.$.status': status } }
-  // );
+  console.log(`Webhook recebido. Pix ${id} agora está com status ${status}.`);
 
   res.status(200).send('OK');
 });
 
-// Inicialização do servidor
-const port = process.env.PORT || 3000;
-app.listen(port, () => {
-  console.log(`Servidor rodando na porta ${port}`);
-});
+// Só roda localmente, não em serverless
+if (!process.env.VERCEL) {
+  const port = process.env.PORT || 3000;
+  app.listen(port, () =>
+    console.log(`Dev server rodando em http://localhost:${port}`)
+  );
+}
+
+// Exporta para Vercel
+module.exports = app;
