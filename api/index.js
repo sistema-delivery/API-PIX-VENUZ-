@@ -146,11 +146,23 @@ app.get('/api/pix/status/:id', async (req, res) => {
   }
 });
 
-// 3) Webhook PIX
 app.post('/api/webhook/pix', (req, res) => {
-  const { transactionId, status } = req.body;
-  console.log(`🔔 Webhook Pix: ${transactionId} -> ${status}`);
-  return res.status(200).send('OK');
+  // 1) Loga todo o corpo para debug
+  console.log('[Webhook] Payload recebido:', JSON.stringify(req.body, null, 2));
+
+  // 2) Extrai corretamente os campos dentro de `transaction`
+  const { event, token } = req.body;
+  const tx           = req.body.transaction || {};
+  const transactionId = tx.id;
+  const identifier    = tx.identifier;
+  const status        = tx.status;
+
+  console.log(`🔔 Webhook Pix [${event}]: tx.id=${transactionId}, identifier=${identifier}, status=${status}`);
+
+  // 3) Aqui você processa: salva no banco, notifica o bot, etc.
+
+  // 4) Responde 2XX para confirmar recebimento
+  return res.status(200).json({ received: true });
 });
 
 app.listen(3000, () => console.log('Rodando local em :3000'));
