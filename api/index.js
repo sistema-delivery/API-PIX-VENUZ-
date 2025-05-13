@@ -1,4 +1,3 @@
-// index.js
 require('dotenv').config();
 const serverless = require('serverless-http');
 const express    = require('express');
@@ -10,7 +9,6 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Carrega variáveis de ambiente
 const {
   VENUZ_PUBLIC_KEY,
   VENUZ_SECRET_KEY,
@@ -23,7 +21,6 @@ if (!VENUZ_PUBLIC_KEY || !VENUZ_SECRET_KEY) {
   process.exit(1);
 }
 
-// Conexão Mongo (opcional)
 if (MONGODB_URI) {
   mongoose.connect(MONGODB_URI, {
     useNewUrlParser: true,
@@ -33,12 +30,10 @@ if (MONGODB_URI) {
     .catch(err => console.error('❌ Erro conectando ao MongoDB:', err));
 }
 
-// Constantes de API
 const API_BASE        = 'https://app.venuzpay.com/api/v1';
 const CREATE_PIX_URL  = `${API_BASE}/gateway/pix/receive`;
 const STATUS_PIX_URL  = `${API_BASE}/gateway/pix/status`;
 
-// Middleware para injetar headers de autenticação
 app.use((req, res, next) => {
   req.venuzHeaders = {
     'x-public-key': VENUZ_PUBLIC_KEY,
@@ -48,9 +43,8 @@ app.use((req, res, next) => {
   next();
 });
 
-// Health-checks
-app.get('/',         (req, res) => res.json({ ok: true, message: 'root OK' }));
-app.get('/api',      (req, res) => res.json({ ok: true, message: '/api OK' }));
+app.get('/',    (req, res) => res.json({ ok: true, message: 'root OK' }));
+app.get('/api', (req, res) => res.json({ ok: true, message: '/api OK' }));
 
 // 1) Cria cobrança PIX
 app.post('/api/pix/create', async (req, res) => {
@@ -68,7 +62,6 @@ app.post('/api/pix/create', async (req, res) => {
     callbackUrl
   } = req.body;
 
-  // Monta payload conforme documentação VenuzPay
   const payload = {
     identifier: identifier || `tg_${Date.now()}`,
     amount,
@@ -83,7 +76,6 @@ app.post('/api/pix/create', async (req, res) => {
 
   if (dueDate) payload.dueDate = dueDate;
 
-  // Define callbackUrl customizado ou usa base
   if (callbackUrl && /^https?:\/\//.test(callbackUrl)) {
     payload.callbackUrl = callbackUrl;
   } else if (WEBHOOK_BASE_URL) {
@@ -99,6 +91,7 @@ app.post('/api/pix/create', async (req, res) => {
     );
     console.log('[API] VenuzPay retornou:', status, data);
 
+    // Extrai exatamente os campos que a doc oficial usa:
     const {
       transactionId,
       status: txStatus,
@@ -106,12 +99,29 @@ app.post('/api/pix/create', async (req, res) => {
       order,
       pix = {}
     } = data;
-    const qrCodeBase64 = pix.qrCodeImage || pix.qrCodeBase64;
-    const qrCodeText   = pix.qrCodeText  || pix.payload;
 
-    return res.status(201).json({ transactionId, status: txStatus, fee, order, qrCodeBase64, qrCodeText });
+    // pix.base64 e pix.code são os campos corretos
+    const qrCodeBase64 = pix.base64;
+    const qrCodeText   = pix.code;
+
+    // Retorna num formato que o bot espera:
+    return res.status(201).json({
+      transactionId,
+      status: txStatus,
+      fee,
+      order,
+      pix: {
+        base64: qrCodeBase64,
+        code:   qrCodeText
+      }
+    });
+
   } catch (err) {
-    console.error('[API] Erro criando PIX:', err.response?.status, err.response?.data || err.message);
+    console.error(
+      '[API] Erro criando PIX:',
+      err.response?.status,
+      err.response?.data || err.message
+    );
     const code = err.response?.status || 500;
     const body = err.response?.data   || { message: err.message };
     return res.status(code).json(body);
@@ -130,7 +140,9 @@ app.get('/api/pix/status/:id', async (req, res) => {
     return res.json(data);
   } catch (err) {
     console.error('[API] Erro consultando status:', err.response?.status, err.response?.data);
-    return res.status(err.response?.status || 500).json(err.response?.data || { message: err.message });
+    return res
+      .status(err.response?.status || 500)
+      .json(err.response?.data || { message: err.message });
   }
 });
 
@@ -138,11 +150,9 @@ app.get('/api/pix/status/:id', async (req, res) => {
 app.post('/api/webhook/pix', (req, res) => {
   const { transactionId, status } = req.body;
   console.log(`🔔 Webhook Pix: ${transactionId} -> ${status}`);
-  // Aqui você pode atualizar o MongoDB ou notificar o bot
   return res.status(200).send('OK');
 });
 
-// Export para Vercel
 app.listen(3000, () => console.log('Rodando local em :3000'));
 module.exports = app;
 module.exports.handler = serverless(app);
